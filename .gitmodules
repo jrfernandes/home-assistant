@@ -1,0 +1,3 @@
+[submodule "homeassistant/components/ontario_energy_board"]
+	path = homeassistant/components/ontario_energy_board
+	url = https://jrfernandes@github.com/jrfernandes/ontario_energy_board
