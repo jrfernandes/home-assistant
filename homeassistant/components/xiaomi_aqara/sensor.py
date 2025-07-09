@@ -1,7 +1,11 @@
 """Support for Xiaomi Aqara sensors."""
+
 from __future__ import annotations
 
 import logging
+from typing import Any
+
+from xiaomi_gateway import XiaomiGateway
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -14,22 +18,22 @@ from homeassistant.const import (
     ATTR_BATTERY_LEVEL,
     LIGHT_LUX,
     PERCENTAGE,
-    POWER_WATT,
-    PRESSURE_HPA,
-    TEMP_CELSIUS,
+    UnitOfPower,
+    UnitOfPressure,
+    UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import XiaomiDevice
 from .const import BATTERY_MODELS, DOMAIN, GATEWAYS_KEY, POWER_MODELS
+from .entity import XiaomiDevice
 
 _LOGGER = logging.getLogger(__name__)
 
 SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     "temperature": SensorEntityDescription(
         key="temperature",
-        native_unit_of_measurement=TEMP_CELSIUS,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
@@ -42,7 +46,6 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     "illumination": SensorEntityDescription(
         key="illumination",
         native_unit_of_measurement="lm",
-        device_class=SensorDeviceClass.ILLUMINANCE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     "lux": SensorEntityDescription(
@@ -53,7 +56,7 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     ),
     "pressure": SensorEntityDescription(
         key="pressure",
-        native_unit_of_measurement=PRESSURE_HPA,
+        native_unit_of_measurement=UnitOfPressure.HPA,
         device_class=SensorDeviceClass.PRESSURE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
@@ -65,7 +68,7 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     ),
     "load_power": SensorEntityDescription(
         key="load_power",
-        native_unit_of_measurement=POWER_WATT,
+        native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
     ),
@@ -85,7 +88,7 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Perform the setup for Xiaomi devices."""
     entities: list[XiaomiSensor | XiaomiBatterySensor] = []
@@ -164,7 +167,14 @@ async def async_setup_entry(
 class XiaomiSensor(XiaomiDevice, SensorEntity):
     """Representation of a XiaomiSensor."""
 
-    def __init__(self, device, name, data_key, xiaomi_hub, config_entry):
+    def __init__(
+        self,
+        device: dict[str, Any],
+        name: str,
+        data_key: str,
+        xiaomi_hub: XiaomiGateway,
+        config_entry: ConfigEntry,
+    ) -> None:
         """Initialize the XiaomiSensor."""
         self._data_key = data_key
         self.entity_description = SENSOR_TYPES[data_key]
@@ -206,7 +216,7 @@ class XiaomiBatterySensor(XiaomiDevice, SensorEntity):
         succeed = super().parse_voltage(data)
         if not succeed:
             return False
-        battery_level = int(self._extra_state_attributes.pop(ATTR_BATTERY_LEVEL))
+        battery_level = int(self._attr_extra_state_attributes.pop(ATTR_BATTERY_LEVEL))
         if battery_level <= 0 or battery_level > 100:
             return False
         self._attr_native_value = battery_level

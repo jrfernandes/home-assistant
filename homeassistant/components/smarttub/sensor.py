@@ -1,16 +1,19 @@
 """Platform for sensor integration."""
+
 from enum import Enum
+from typing import Any
 
 import smarttub
 import voluptuous as vol
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, entity_platform
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.typing import VolDictType
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import DOMAIN, SMARTTUB_CONTROLLER
+from .controller import SmartTubConfigEntry
 from .entity import SmartTubSensorBase
 
 # the desired duration, in hours, of the cycle
@@ -30,7 +33,7 @@ SET_PRIMARY_FILTRATION_SCHEMA = vol.All(
     ),
 )
 
-SET_SECONDARY_FILTRATION_SCHEMA = {
+SET_SECONDARY_FILTRATION_SCHEMA: VolDictType = {
     vol.Required(ATTR_MODE): vol.In(
         {
             mode.name.lower()
@@ -41,11 +44,13 @@ SET_SECONDARY_FILTRATION_SCHEMA = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: SmartTubConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up sensor entities for the sensors in the tub."""
 
-    controller = hass.data[DOMAIN][entry.entry_id][SMARTTUB_CONTROLLER]
+    controller = entry.runtime_data
 
     entities = []
     for spa in controller.spas:
@@ -89,17 +94,23 @@ class SmartTubSensor(SmartTubSensorBase, SensorEntity):
     """Generic class for SmartTub status sensors."""
 
     @property
-    def native_value(self) -> str:
+    def native_value(self) -> str | None:
         """Return the current state of the sensor."""
+        if self._state is None:
+            return None
+
         if isinstance(self._state, Enum):
             return self._state.name.lower()
+
         return self._state.lower()
 
 
 class SmartTubPrimaryFiltrationCycle(SmartTubSensor):
     """The primary filtration cycle."""
 
-    def __init__(self, coordinator, spa):
+    def __init__(
+        self, coordinator: DataUpdateCoordinator[dict[str, Any]], spa: smarttub.Spa
+    ) -> None:
         """Initialize the entity."""
         super().__init__(
             coordinator, spa, "Primary Filtration Cycle", "primary_filtration"
@@ -116,7 +127,7 @@ class SmartTubPrimaryFiltrationCycle(SmartTubSensor):
         return self.cycle.status.name.lower()
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return {
             ATTR_DURATION: self.cycle.duration,
@@ -137,7 +148,9 @@ class SmartTubPrimaryFiltrationCycle(SmartTubSensor):
 class SmartTubSecondaryFiltrationCycle(SmartTubSensor):
     """The secondary filtration cycle."""
 
-    def __init__(self, coordinator, spa):
+    def __init__(
+        self, coordinator: DataUpdateCoordinator[dict[str, Any]], spa: smarttub.Spa
+    ) -> None:
         """Initialize the entity."""
         super().__init__(
             coordinator, spa, "Secondary Filtration Cycle", "secondary_filtration"
@@ -154,7 +167,7 @@ class SmartTubSecondaryFiltrationCycle(SmartTubSensor):
         return self.cycle.status.name.lower()
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return {
             ATTR_CYCLE_LAST_UPDATED: self.cycle.last_updated.isoformat(),

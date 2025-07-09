@@ -1,6 +1,9 @@
 """Browse media features for media player."""
+
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
 from typing import Any
@@ -18,10 +21,14 @@ from homeassistant.helpers.network import (
     is_hass_url,
 )
 
-from .const import CONTENT_AUTH_EXPIRY_TIME, MEDIA_CLASS_DIRECTORY
+from .const import CONTENT_AUTH_EXPIRY_TIME, MediaClass, MediaType
 
 # Paths that we don't need to sign
-PATHS_WITHOUT_AUTH = ("/api/tts_proxy/",)
+PATHS_WITHOUT_AUTH = (
+    "/api/tts_proxy/",
+    "/api/esphome/ffmpeg_proxy/",
+    "/api/assist_satellite/static/",
+)
 
 
 @callback
@@ -41,17 +48,19 @@ def async_process_play_media_url(
     if parsed.is_absolute():
         if not is_hass_url(hass, media_content_id):
             return media_content_id
-    else:
-        if media_content_id[0] != "/":
-            raise ValueError("URL is relative, but does not start with a /")
+    elif media_content_id[0] != "/":
+        return media_content_id
 
+    # https://github.com/pylint-dev/pylint/issues/3484
+    # pylint: disable-next=using-constant-test
     if parsed.query:
         logging.getLogger(__name__).debug(
             "Not signing path for content with query param"
         )
     elif parsed.path.startswith(PATHS_WITHOUT_AUTH):
-        # We don't sign this path if it doesn't need auth. Although signing itself can't hurt,
-        # some devices are unable to handle long URLs and the auth signature might push it over.
+        # We don't sign this path if it doesn't need auth. Although signing itself can't
+        # hurt, some devices are unable to handle long URLs and the auth signature might
+        # push it over.
         pass
     else:
         signed_path = async_sign_path(
@@ -91,16 +100,17 @@ class BrowseMedia:
     def __init__(
         self,
         *,
-        media_class: str,
+        media_class: MediaClass | str,
         media_content_id: str,
-        media_content_type: str,
+        media_content_type: MediaType | str,
         title: str,
         can_play: bool,
         can_expand: bool,
-        children: list[BrowseMedia] | None = None,
-        children_media_class: str | None = None,
+        children: Sequence[BrowseMedia] | None = None,
+        children_media_class: MediaClass | str | None = None,
         thumbnail: str | None = None,
         not_shown: int = 0,
+        can_search: bool = False,
     ) -> None:
         """Initialize browse media item."""
         self.media_class = media_class
@@ -113,8 +123,9 @@ class BrowseMedia:
         self.children_media_class = children_media_class
         self.thumbnail = thumbnail
         self.not_shown = not_shown
+        self.can_search = can_search
 
-    def as_dict(self, *, parent: bool = True) -> dict:
+    def as_dict(self, *, parent: bool = True) -> dict[str, Any]:
         """Convert Media class to browse media dictionary."""
         if self.children_media_class is None and self.children:
             self.calculate_children_class()
@@ -127,6 +138,7 @@ class BrowseMedia:
             "children_media_class": self.children_media_class,
             "can_play": self.can_play,
             "can_expand": self.can_expand,
+            "can_search": self.can_search,
             "thumbnail": self.thumbnail,
         }
 
@@ -146,7 +158,7 @@ class BrowseMedia:
 
     def calculate_children_class(self) -> None:
         """Count the children media classes and calculate the correct class."""
-        self.children_media_class = MEDIA_CLASS_DIRECTORY
+        self.children_media_class = MediaClass.DIRECTORY
         assert self.children is not None
         proposed_class = self.children[0].media_class
         if all(child.media_class == proposed_class for child in self.children):
@@ -155,3 +167,27 @@ class BrowseMedia:
     def __repr__(self) -> str:
         """Return representation of browse media."""
         return f"<BrowseMedia {self.title} ({self.media_class})>"
+
+
+@dataclass(kw_only=True, frozen=True)
+class SearchMedia:
+    """Represent search results."""
+
+    version: int = field(default=1)
+    result: list[BrowseMedia]
+
+    def as_dict(self, *, parent: bool = True) -> dict[str, Any]:
+        """Convert SearchMedia class to browse media dictionary."""
+        return {
+            "result": [item.as_dict(parent=parent) for item in self.result],
+        }
+
+
+@dataclass(kw_only=True, frozen=True)
+class SearchMediaQuery:
+    """Represent a search media file."""
+
+    search_query: str
+    media_content_type: MediaType | str | None = field(default=None)
+    media_content_id: str | None = None
+    media_filter_classes: list[MediaClass] | None = field(default=None)

@@ -1,14 +1,14 @@
 """Test helpers for UniFi Protect."""
-# pylint: disable=protected-access
+
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Sequence
 from unittest.mock import Mock
 
-from pyunifiprotect import ProtectApiClient
-from pyunifiprotect.data import (
+from uiprotect import ProtectApiClient
+from uiprotect.data import (
     Bootstrap,
     Camera,
     Event,
@@ -17,14 +17,15 @@ from pyunifiprotect.data import (
     ProtectAdoptableDeviceModel,
     WSSubscriptionMessage,
 )
-from pyunifiprotect.data.bootstrap import ProtectDeviceRef
-from pyunifiprotect.test_util.anonymize import random_hex
+from uiprotect.data.bootstrap import ProtectDeviceRef
+from uiprotect.test_util.anonymize import random_hex
+from uiprotect.websocket import WebsocketState
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, split_entity_id
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityDescription
-import homeassistant.util.dt as dt_util
+from homeassistant.util import dt as dt_util
 
 from tests.common import MockConfigEntry, async_fire_time_changed
 
@@ -36,12 +37,13 @@ class MockUFPFixture:
     entry: MockConfigEntry
     api: ProtectApiClient
     ws_subscription: Callable[[WSSubscriptionMessage], None] | None = None
+    ws_state_subscription: Callable[[WebsocketState], None] | None = None
 
-    def ws_msg(self, msg: WSSubscriptionMessage) -> Any:
+    def ws_msg(self, msg: WSSubscriptionMessage) -> None:
         """Emit WS message for testing."""
 
         if self.ws_subscription is not None:
-            return self.ws_subscription(msg)
+            self.ws_subscription(msg)
 
 
 def reset_objects(bootstrap: Bootstrap):
@@ -106,7 +108,13 @@ def ids_from_device_description(
     """Return expected unique_id and entity_id for a give platform/device/description combination."""
 
     entity_name = normalize_name(device.display_name)
-    description_entity_name = normalize_name(str(description.name))
+
+    if getattr(description, "translation_key", None):
+        description_entity_name = normalize_name(description.translation_key)
+    elif getattr(description, "device_class", None):
+        description_entity_name = normalize_name(description.device_class)
+    else:
+        description_entity_name = normalize_name(description.key)
 
     unique_id = f"{device.mac}_{description.key}"
     entity_id = f"{platform.value}.{entity_name}_{description_entity_name}"
@@ -149,7 +157,6 @@ def add_device(
 
     if regenerate_ids:
         regenerate_device_ids(device)
-    device._initial_data = device.dict()
 
     devices = getattr(bootstrap, f"{device.model.value}s")
     devices[device.id] = device
@@ -174,38 +181,44 @@ async def init_entry(
 
 async def remove_entities(
     hass: HomeAssistant,
+    ufp: MockUFPFixture,
     ufp_devices: list[ProtectAdoptableDeviceModel],
 ) -> None:
     """Remove all entities for given Protect devices."""
-
-    entity_registry = er.async_get(hass)
-    device_registry = dr.async_get(hass)
 
     for ufp_device in ufp_devices:
         if not ufp_device.is_adopted_by_us:
             continue
 
-        name = ufp_device.display_name.replace(" ", "_").lower()
-        entity = entity_registry.async_get(f"{Platform.SENSOR}.{name}_uptime")
-        assert entity is not None
+        devices = getattr(ufp.api.bootstrap, f"{ufp_device.model.value}s")
+        del devices[ufp_device.id]
 
-        device_id = entity.device_id
-        for reg in list(entity_registry.entities.values()):
-            if reg.device_id == device_id:
-                entity_registry.async_remove(reg.entity_id)
-        device_registry.async_remove_device(device_id)
+        mock_msg = Mock()
+        mock_msg.changed_data = {}
+        mock_msg.old_obj = ufp_device
+        mock_msg.new_obj = None
+        ufp.ws_msg(mock_msg)
 
-    await hass.async_block_till_done()
+    await time_changed(hass, 30)
 
 
 async def adopt_devices(
     hass: HomeAssistant,
     ufp: MockUFPFixture,
     ufp_devices: list[ProtectAdoptableDeviceModel],
+    fully_adopt: bool = False,
 ):
     """Emit WS to re-adopt give Protect devices."""
 
     for ufp_device in ufp_devices:
+        if fully_adopt:
+            ufp_device.is_adopted = True
+            ufp_device.is_adopted_by_other = False
+            ufp_device.can_adopt = False
+
+        devices = getattr(ufp.api.bootstrap, f"{ufp_device.model.value}s")
+        devices[ufp_device.id] = ufp_device
+
         mock_msg = Mock()
         mock_msg.changed_data = {}
         mock_msg.new_obj = Event(

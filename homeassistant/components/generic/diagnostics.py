@@ -1,4 +1,5 @@
 """Diagnostics support for generic (IP camera)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -21,13 +22,17 @@ TO_REDACT = {
 # A very similar redact function is in components.sql.  Possible to be made common.
 def redact_url(data: str) -> str:
     """Redact credentials from string url."""
-    url_in = yarl.URL(data)
+    url = url_in = yarl.URL(data)
+    # https://github.com/pylint-dev/pylint/issues/3484
+    # pylint: disable-next=using-constant-test
     if url_in.user:
-        url = url_in.with_user("****")
+        url = url.with_user("****")
+    # pylint: disable-next=using-constant-test
     if url_in.password:
         url = url.with_password("****")
-    if url_in.path:
+    if url_in.path != "/":
         url = url.with_path("****")
+    # pylint: disable-next=using-constant-test
     if url_in.query_string:
         url = url.with_query("****=****")
     return str(url)

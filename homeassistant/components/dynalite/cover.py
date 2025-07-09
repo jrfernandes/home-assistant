@@ -2,25 +2,28 @@
 
 from typing import Any
 
-from homeassistant.components.cover import DEVICE_CLASSES, CoverDeviceClass, CoverEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.cover import (
+    ATTR_CURRENT_POSITION,
+    CoverDeviceClass,
+    CoverEntity,
+)
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util.enum import try_parse_enum
 
-from .dynalitebase import DynaliteBase, async_setup_entry_base
-
-DEFAULT_COVER_CLASS = CoverDeviceClass.SHUTTER
+from .bridge import DynaliteBridge, DynaliteConfigEntry
+from .entity import DynaliteBase, async_setup_entry_base
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    config_entry: DynaliteConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Record the async_add_entities function to add them later when received from Dynalite."""
 
     @callback
-    def cover_from_device(device, bridge):
+    def cover_from_device(device: Any, bridge: DynaliteBridge) -> CoverEntity:
         if device.has_tilt:
             return DynaliteCoverWithTilt(device, bridge)
         return DynaliteCover(device, bridge)
@@ -33,14 +36,11 @@ async def async_setup_entry(
 class DynaliteCover(DynaliteBase, CoverEntity):
     """Representation of a Dynalite Channel as a Home Assistant Cover."""
 
-    @property
-    def device_class(self) -> str:
-        """Return the class of the device."""
-        dev_cls = self._device.device_class
-        ret_val = DEFAULT_COVER_CLASS
-        if dev_cls in DEVICE_CLASSES:
-            ret_val = dev_cls
-        return ret_val
+    def __init__(self, device: Any, bridge: DynaliteBridge) -> None:
+        """Initialize the cover."""
+        super().__init__(device, bridge)
+        device_class = try_parse_enum(CoverDeviceClass, self._device.device_class)
+        self._attr_device_class = device_class or CoverDeviceClass.SHUTTER
 
     @property
     def current_cover_position(self) -> int:
@@ -77,6 +77,12 @@ class DynaliteCover(DynaliteBase, CoverEntity):
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
         await self._device.async_stop_cover(**kwargs)
+
+    def initialize_state(self, state):
+        """Initialize the state from cache."""
+        target_level = state.attributes.get(ATTR_CURRENT_POSITION)
+        if target_level is not None:
+            self._device.init_level(target_level)
 
 
 class DynaliteCoverWithTilt(DynaliteCover):

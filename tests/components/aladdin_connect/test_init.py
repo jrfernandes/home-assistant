@@ -1,52 +1,79 @@
-"""Test for Aladdin Connect init logic."""
-from unittest.mock import patch
+"""Tests for the Aladdin Connect integration."""
 
-from homeassistant.components.aladdin_connect.const import DOMAIN
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.components.aladdin_connect import DOMAIN
+from homeassistant.config_entries import (
+    SOURCE_IGNORE,
+    ConfigEntryDisabler,
+    ConfigEntryState,
+)
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 
 from tests.common import MockConfigEntry
 
-YAML_CONFIG = {"username": "test-user", "password": "test-password"}
 
-
-async def test_entry_password_fail(hass: HomeAssistant):
-    """Test password fail during entry."""
-    entry = MockConfigEntry(
+async def test_aladdin_connect_repair_issue(
+    hass: HomeAssistant, issue_registry: ir.IssueRegistry
+) -> None:
+    """Test the Aladdin Connect configuration entry loading/unloading handles the repair."""
+    config_entry_1 = MockConfigEntry(
+        title="Example 1",
         domain=DOMAIN,
-        data={"username": "test-user", "password": "test-password"},
     )
-    entry.add_to_hass(hass)
-
-    with patch(
-        "homeassistant.components.aladdin_connect.cover.AladdinConnectClient.login",
-        return_value=False,
-    ):
-
-        await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-        assert entry.state is ConfigEntryState.SETUP_ERROR
-
-
-async def test_load_and_unload(hass: HomeAssistant) -> None:
-    """Test loading and unloading Aladdin Connect entry."""
-    config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        data=YAML_CONFIG,
-        unique_id="test-id",
-    )
-    config_entry.add_to_hass(hass)
-    with patch(
-        "homeassistant.components.aladdin_connect.cover.AladdinConnectClient.login",
-        return_value=True,
-    ):
-
-        await hass.config_entries.async_setup(config_entry.entry_id)
-        await hass.async_block_till_done()
-
-    assert config_entry.state == ConfigEntryState.LOADED
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
-
-    assert await config_entry.async_unload(hass)
+    config_entry_1.add_to_hass(hass)
+    await hass.config_entries.async_setup(config_entry_1.entry_id)
     await hass.async_block_till_done()
-    assert config_entry.state == ConfigEntryState.NOT_LOADED
+    assert config_entry_1.state is ConfigEntryState.LOADED
+
+    # Add a second one
+    config_entry_2 = MockConfigEntry(
+        title="Example 2",
+        domain=DOMAIN,
+    )
+    config_entry_2.add_to_hass(hass)
+    await hass.config_entries.async_setup(config_entry_2.entry_id)
+    await hass.async_block_till_done()
+
+    assert config_entry_2.state is ConfigEntryState.LOADED
+    assert issue_registry.async_get_issue(DOMAIN, DOMAIN)
+
+    # Add an ignored entry
+    config_entry_3 = MockConfigEntry(
+        source=SOURCE_IGNORE,
+        domain=DOMAIN,
+    )
+    config_entry_3.add_to_hass(hass)
+    await hass.config_entries.async_setup(config_entry_3.entry_id)
+    await hass.async_block_till_done()
+
+    assert config_entry_3.state is ConfigEntryState.NOT_LOADED
+
+    # Add a disabled entry
+    config_entry_4 = MockConfigEntry(
+        disabled_by=ConfigEntryDisabler.USER,
+        domain=DOMAIN,
+    )
+    config_entry_4.add_to_hass(hass)
+    await hass.config_entries.async_setup(config_entry_4.entry_id)
+    await hass.async_block_till_done()
+
+    assert config_entry_4.state is ConfigEntryState.NOT_LOADED
+
+    # Remove the first one
+    await hass.config_entries.async_remove(config_entry_1.entry_id)
+    await hass.async_block_till_done()
+
+    assert config_entry_1.state is ConfigEntryState.NOT_LOADED
+    assert config_entry_2.state is ConfigEntryState.LOADED
+    assert issue_registry.async_get_issue(DOMAIN, DOMAIN)
+
+    # Remove the second one
+    await hass.config_entries.async_remove(config_entry_2.entry_id)
+    await hass.async_block_till_done()
+
+    assert config_entry_1.state is ConfigEntryState.NOT_LOADED
+    assert config_entry_2.state is ConfigEntryState.NOT_LOADED
+    assert issue_registry.async_get_issue(DOMAIN, DOMAIN) is None
+
+    # Check the ignored and disabled entries are removed
+    assert not hass.config_entries.async_entries(DOMAIN)

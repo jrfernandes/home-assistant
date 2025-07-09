@@ -1,38 +1,43 @@
 """Device tracker for MyBMW vehicles."""
+
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Any
 
 from bimmer_connected.vehicle import MyBMWVehicle
 
-from homeassistant.components.device_tracker import SOURCE_TYPE_GPS
-from homeassistant.components.device_tracker.config_entry import TrackerEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.device_tracker import TrackerEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import BMWBaseEntity
-from .const import ATTR_DIRECTION, DOMAIN
+from . import BMWConfigEntry
+from .const import ATTR_DIRECTION
 from .coordinator import BMWDataUpdateCoordinator
+from .entity import BMWBaseEntity
+
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    config_entry: BMWConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the MyBMW tracker from config entry."""
-    coordinator: BMWDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator = config_entry.runtime_data
     entities: list[BMWDeviceTracker] = []
 
     for vehicle in coordinator.account.vehicles:
         entities.append(BMWDeviceTracker(coordinator, vehicle))
         if not vehicle.is_vehicle_tracking_enabled:
             _LOGGER.info(
-                "Tracking is (currently) disabled for vehicle %s (%s), defaulting to unknown",
+                (
+                    "Tracking is (currently) disabled for vehicle %s (%s), defaulting"
+                    " to unknown"
+                ),
                 vehicle.name,
                 vehicle.vin,
             )
@@ -43,7 +48,8 @@ class BMWDeviceTracker(BMWBaseEntity, TrackerEntity):
     """MyBMW device tracker."""
 
     _attr_force_update = False
-    _attr_icon = "mdi:car"
+    _attr_translation_key = "car"
+    _attr_name = None
 
     def __init__(
         self,
@@ -52,14 +58,12 @@ class BMWDeviceTracker(BMWBaseEntity, TrackerEntity):
     ) -> None:
         """Initialize the Tracker."""
         super().__init__(coordinator, vehicle)
-
         self._attr_unique_id = vehicle.vin
-        self._attr_name = vehicle.name
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return entity specific state attributes."""
-        return {**self._attrs, ATTR_DIRECTION: self.vehicle.vehicle_location.heading}
+        return {ATTR_DIRECTION: self.vehicle.vehicle_location.heading}
 
     @property
     def latitude(self) -> float | None:
@@ -67,6 +71,7 @@ class BMWDeviceTracker(BMWBaseEntity, TrackerEntity):
         return (
             self.vehicle.vehicle_location.location[0]
             if self.vehicle.is_vehicle_tracking_enabled
+            and self.vehicle.vehicle_location.location
             else None
         )
 
@@ -76,10 +81,6 @@ class BMWDeviceTracker(BMWBaseEntity, TrackerEntity):
         return (
             self.vehicle.vehicle_location.location[1]
             if self.vehicle.is_vehicle_tracking_enabled
+            and self.vehicle.vehicle_location.location
             else None
         )
-
-    @property
-    def source_type(self) -> Literal["gps"]:
-        """Return the source type, eg gps or router, of the device."""
-        return SOURCE_TYPE_GPS

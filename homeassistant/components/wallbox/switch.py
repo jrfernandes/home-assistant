@@ -1,4 +1,5 @@
 """Home Assistant component for accessing the Wallbox Portal API. The switch component creates a switch entity."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,34 +7,40 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import WallboxCoordinator, WallboxEntity
 from .const import (
     CHARGER_DATA_KEY,
     CHARGER_PAUSE_RESUME_KEY,
     CHARGER_SERIAL_NUMBER_KEY,
     CHARGER_STATUS_DESCRIPTION_KEY,
-    DOMAIN,
     ChargerStatus,
 )
+from .coordinator import WallboxCoordinator
+from .entity import WallboxEntity
 
 SWITCH_TYPES: dict[str, SwitchEntityDescription] = {
     CHARGER_PAUSE_RESUME_KEY: SwitchEntityDescription(
         key=CHARGER_PAUSE_RESUME_KEY,
-        name="Pause/Resume",
+        translation_key="pause_resume",
     ),
 }
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Create wallbox sensor entities in HASS."""
-    coordinator: WallboxCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: WallboxCoordinator = entry.runtime_data
     async_add_entities(
-        [WallboxSwitch(coordinator, entry, SWITCH_TYPES[CHARGER_PAUSE_RESUME_KEY])]
+        [WallboxSwitch(coordinator, SWITCH_TYPES[CHARGER_PAUSE_RESUME_KEY])]
     )
+
+
+# Coordinator is used to centralize the data updates
+PARALLEL_UPDATES = 0
 
 
 class WallboxSwitch(WallboxEntity, SwitchEntity):
@@ -42,22 +49,26 @@ class WallboxSwitch(WallboxEntity, SwitchEntity):
     def __init__(
         self,
         coordinator: WallboxCoordinator,
-        entry: ConfigEntry,
         description: SwitchEntityDescription,
     ) -> None:
         """Initialize a Wallbox switch."""
         super().__init__(coordinator)
         self.entity_description = description
-        self._attr_name = f"{entry.title} {description.name}"
         self._attr_unique_id = f"{description.key}-{coordinator.data[CHARGER_DATA_KEY][CHARGER_SERIAL_NUMBER_KEY]}"
 
     @property
     def available(self) -> bool:
         """Return the availability of the switch."""
-        return self.coordinator.data[CHARGER_STATUS_DESCRIPTION_KEY] in {
-            ChargerStatus.CHARGING,
-            ChargerStatus.PAUSED,
-            ChargerStatus.SCHEDULED,
+        return super().available and self.coordinator.data[
+            CHARGER_STATUS_DESCRIPTION_KEY
+        ] not in {
+            ChargerStatus.UNKNOWN,
+            ChargerStatus.UPDATING,
+            ChargerStatus.ERROR,
+            ChargerStatus.LOCKED,
+            ChargerStatus.LOCKED_CAR_CONNECTED,
+            ChargerStatus.DISCONNECTED,
+            ChargerStatus.READY,
         }
 
     @property
@@ -65,6 +76,7 @@ class WallboxSwitch(WallboxEntity, SwitchEntity):
         """Return the status of pause/resume."""
         return self.coordinator.data[CHARGER_STATUS_DESCRIPTION_KEY] in {
             ChargerStatus.CHARGING,
+            ChargerStatus.DISCHARGING,
             ChargerStatus.WAITING_FOR_CAR,
             ChargerStatus.WAITING,
         }

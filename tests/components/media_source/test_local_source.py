@@ -1,4 +1,6 @@
 """Test Local Media Source."""
+
+from collections.abc import AsyncGenerator
 from http import HTTPStatus
 import io
 from pathlib import Path
@@ -9,12 +11,16 @@ import pytest
 
 from homeassistant.components import media_source, websocket_api
 from homeassistant.components.media_source import const
-from homeassistant.config import async_process_ha_core_config
+from homeassistant.core import HomeAssistant
+from homeassistant.core_config import async_process_ha_core_config
 from homeassistant.setup import async_setup_component
+
+from tests.common import MockUser
+from tests.typing import ClientSessionGenerator, WebSocketGenerator
 
 
 @pytest.fixture
-async def temp_dir(hass):
+async def temp_dir(hass: HomeAssistant) -> AsyncGenerator[str]:
     """Return a temp dir."""
     with TemporaryDirectory() as tmpdirname:
         target_dir = Path(tmpdirname) / "another_subdir"
@@ -27,7 +33,7 @@ async def temp_dir(hass):
         yield str(target_dir)
 
 
-async def test_async_browse_media(hass):
+async def test_async_browse_media(hass: HomeAssistant) -> None:
     """Test browse media."""
     local_media = hass.config.path("media")
     await async_process_ha_core_config(
@@ -83,7 +89,9 @@ async def test_async_browse_media(hass):
     assert media
 
 
-async def test_media_view(hass, hass_client):
+async def test_media_view(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator
+) -> None:
     """Test media view."""
     local_media = hass.config.path("media")
     await async_process_ha_core_config(
@@ -97,6 +105,9 @@ async def test_media_view(hass, hass_client):
     client = await hass_client()
 
     # Protects against non-existent files
+    resp = await client.head("/media/local/invalid.txt")
+    assert resp.status == HTTPStatus.NOT_FOUND
+
     resp = await client.get("/media/local/invalid.txt")
     assert resp.status == HTTPStatus.NOT_FOUND
 
@@ -104,14 +115,23 @@ async def test_media_view(hass, hass_client):
     assert resp.status == HTTPStatus.NOT_FOUND
 
     # Protects against non-media files
+    resp = await client.head("/media/local/not_media.txt")
+    assert resp.status == HTTPStatus.NOT_FOUND
+
     resp = await client.get("/media/local/not_media.txt")
     assert resp.status == HTTPStatus.NOT_FOUND
 
     # Protects against unknown local media sources
+    resp = await client.head("/media/unknown_source/not_media.txt")
+    assert resp.status == HTTPStatus.NOT_FOUND
+
     resp = await client.get("/media/unknown_source/not_media.txt")
     assert resp.status == HTTPStatus.NOT_FOUND
 
     # Fetch available media
+    resp = await client.head("/media/local/test.mp3")
+    assert resp.status == HTTPStatus.OK
+
     resp = await client.get("/media/local/test.mp3")
     assert resp.status == HTTPStatus.OK
 
@@ -122,10 +142,19 @@ async def test_media_view(hass, hass_client):
     assert resp.status == HTTPStatus.OK
 
 
-async def test_upload_view(hass, hass_client, temp_dir, hass_admin_user):
+async def test_upload_view(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    temp_dir: str,
+    tmp_path: Path,
+    hass_admin_user: MockUser,
+) -> None:
     """Allow uploading media."""
+    # We need a temp dir that's not under tempdir fixture
+    extra_media_dir = tmp_path
+    hass.config.media_dirs["another_path"] = temp_dir
 
-    img = (Path(__file__).parent.parent / "image/logo.png").read_bytes()
+    img = (Path(__file__).parent.parent / "image_upload/logo.png").read_bytes()
 
     def get_file(name):
         pic = io.BytesIO(img)
@@ -138,13 +167,23 @@ async def test_upload_view(hass, hass_client, temp_dir, hass_admin_user):
     res = await client.post(
         "/api/media_source/local_source/upload",
         data={
-            "media_content_id": "media-source://media_source/test_dir/.",
+            "media_content_id": "media-source://media_source/test_dir",
             "file": get_file("logo.png"),
         },
     )
 
     assert res.status == 200
-    assert (Path(temp_dir) / "logo.png").is_file()
+    data = await res.json()
+    assert data["media_content_id"] == "media-source://media_source/test_dir/logo.png"
+    uploaded_path = Path(temp_dir) / "logo.png"
+    assert uploaded_path.is_file()
+
+    resolved = await media_source.async_resolve_media(
+        hass, data["media_content_id"], target_media_player=None
+    )
+    assert resolved.url == "/media/test_dir/logo.png"
+    assert resolved.mime_type == "image/png"
+    assert resolved.path == uploaded_path
 
     # Test with bad media source ID
     for bad_id in (
@@ -156,6 +195,8 @@ async def test_upload_view(hass, hass_client, temp_dir, hass_admin_user):
         "media-source://media_source/test_dir/..",
         # Domain != media_source
         "media-source://nest/test_dir/.",
+        # Other directory
+        f"media-source://media_source/another_path///{extra_media_dir}/",
         # Completely something else
         "http://bla",
     ):
@@ -167,7 +208,7 @@ async def test_upload_view(hass, hass_client, temp_dir, hass_admin_user):
             },
         )
 
-        assert res.status == 400
+        assert res.status == 400, bad_id
         assert not (Path(temp_dir) / "bad-source-id.png").is_file()
 
     # Test invalid POST data
@@ -226,7 +267,12 @@ async def test_upload_view(hass, hass_client, temp_dir, hass_admin_user):
     assert not (Path(temp_dir) / "no-admin-test.png").is_file()
 
 
-async def test_remove_file(hass, hass_ws_client, temp_dir, hass_admin_user):
+async def test_remove_file(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    temp_dir: str,
+    hass_admin_user: MockUser,
+) -> None:
     """Allow uploading media."""
 
     msg_count = 0

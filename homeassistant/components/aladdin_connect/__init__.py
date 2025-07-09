@@ -1,37 +1,40 @@
-"""The aladdin_connect component."""
-import logging
-from typing import Final
+"""The Aladdin Connect Genie integration."""
 
-from aladdin_connect import AladdinConnectClient
+from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 
-from .const import DOMAIN
-
-_LOGGER: Final = logging.getLogger(__name__)
-
-PLATFORMS: list[Platform] = [Platform.COVER]
+DOMAIN = "aladdin_connect"
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up platform from a ConfigEntry."""
-    username = entry.data[CONF_USERNAME]
-    password = entry.data[CONF_PASSWORD]
-    acc = AladdinConnectClient(username, password)
-    if not await hass.async_add_executor_job(acc.login):
-        raise ConfigEntryAuthFailed("Incorrect Password")
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = acc
-    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+async def async_setup_entry(hass: HomeAssistant, _: ConfigEntry) -> bool:
+    """Set up Aladdin Connect from a config entry."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        DOMAIN,
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="integration_removed",
+        translation_placeholders={
+            "entries": "/config/integrations/integration/aladdin_connect",
+        },
+    )
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+    return True
 
-    return unload_ok
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove a config entry."""
+    if not hass.config_entries.async_loaded_entries(DOMAIN):
+        ir.async_delete_issue(hass, DOMAIN, DOMAIN)
+        # Remove any remaining disabled or ignored entries
+        for _entry in hass.config_entries.async_entries(DOMAIN):
+            hass.async_create_task(hass.config_entries.async_remove(_entry.entry_id))

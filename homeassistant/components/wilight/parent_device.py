@@ -1,11 +1,12 @@
 """The WiLight Device integration."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 
 import pywilight
-from pywilight.wilight_device import Device as PyWiLightDevice
+from pywilight.wilight_device import PyWiLightDevice
 import requests
 
 from homeassistant.config_entries import ConfigEntry
@@ -77,7 +78,7 @@ class WiLightParent:
                 EVENT_HOMEASSISTANT_STOP, lambda x: client.stop()
             )
 
-            _LOGGER.info("Connected to WiLight device: %s", api_device.device_id)
+            _LOGGER.debug("Connected to WiLight device: %s", api_device.device_id)
 
         await connect(api_device)
 

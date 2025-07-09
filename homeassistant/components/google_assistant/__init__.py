@@ -1,4 +1,5 @@
 """Support for Actions on Google Assistant Smart Home Control."""
+
 from __future__ import annotations
 
 import logging
@@ -11,7 +12,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
-from .const import (
+from .const import (  # noqa: F401
     CONF_ALIASES,
     CONF_CLIENT_EMAIL,
     CONF_ENTITY_CONFIG,
@@ -28,9 +29,10 @@ from .const import (
     DEFAULT_EXPOSE_BY_DEFAULT,
     DEFAULT_EXPOSED_DOMAINS,
     DOMAIN,
+    EVENT_QUERY_RECEIVED,
     SERVICE_REQUEST_SYNC,
+    SOURCE_CLOUD,
 )
-from .const import EVENT_QUERY_RECEIVED  # noqa: F401
 from .http import GoogleAssistantView, GoogleConfig
 
 from .const import EVENT_COMMAND_RECEIVED, EVENT_SYNC_RECEIVED  # noqa: F401, isort:skip
@@ -93,6 +95,8 @@ CONFIG_SCHEMA = vol.Schema(
     {vol.Optional(DOMAIN): GOOGLE_ASSISTANT_SCHEMA}, extra=vol.ALLOW_EXTRA
 )
 
+type GoogleConfigEntry = ConfigEntry[GoogleConfig]
+
 
 async def async_setup(hass: HomeAssistant, yaml_config: ConfigType) -> bool:
     """Activate Google Actions component."""
@@ -113,7 +117,7 @@ async def async_setup(hass: HomeAssistant, yaml_config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: GoogleConfigEntry) -> bool:
     """Set up from a config entry."""
 
     config: ConfigType = {**hass.data[DOMAIN][DATA_CONFIG]}
@@ -139,7 +143,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     google_config = GoogleConfig(hass, config)
     await google_config.async_initialize()
 
-    hass.data[DOMAIN][entry.entry_id] = google_config
+    entry.runtime_data = google_config
 
     hass.http.register_view(GoogleAssistantView(google_config))
 
@@ -152,7 +156,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if agent_user_id is None:
             _LOGGER.warning(
-                "No agent_user_id supplied for request_sync. Call as a user or pass in user id as agent_user_id"
+                "No agent_user_id supplied for request_sync. Call as a user or pass in"
+                " user id as agent_user_id"
             )
             return
 
@@ -164,6 +169,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             DOMAIN, SERVICE_REQUEST_SYNC, request_sync_service_handler
         )
 
-    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True

@@ -1,17 +1,23 @@
 """Validate device conditions."""
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol
 
 import voluptuous as vol
 
 from homeassistant.const import CONF_DOMAIN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.condition import (
+    Condition,
+    ConditionCheckerType,
+    trace_condition_function,
+)
 from homeassistant.helpers.typing import ConfigType
 
 from . import DeviceAutomationType, async_get_device_automation_platform
-from .exceptions import InvalidDeviceAutomationConfig
+from .helpers import async_validate_device_automation_config
 
 if TYPE_CHECKING:
     from homeassistant.helpers import condition
@@ -32,7 +38,7 @@ class DeviceAutomationConditionProtocol(Protocol):
 
     def async_condition_from_config(
         self, hass: HomeAssistant, config: ConfigType
-    ) -> condition.ConditionCheckerType:
+    ) -> ConditionCheckerType:
         """Evaluate state based on configuration."""
 
     async def async_get_condition_capabilities(
@@ -46,27 +52,38 @@ class DeviceAutomationConditionProtocol(Protocol):
         """List conditions."""
 
 
-async def async_validate_condition_config(
-    hass: HomeAssistant, config: ConfigType
-) -> ConfigType:
-    """Validate device condition config."""
-    try:
-        config = cv.DEVICE_CONDITION_SCHEMA(config)
-        platform = await async_get_device_automation_platform(
-            hass, config[CONF_DOMAIN], DeviceAutomationType.CONDITION
+class DeviceCondition(Condition):
+    """Device condition."""
+
+    def __init__(self, hass: HomeAssistant, config: ConfigType) -> None:
+        """Initialize condition."""
+        self._config = config
+        self._hass = hass
+
+    @classmethod
+    async def async_validate_condition_config(
+        cls, hass: HomeAssistant, config: ConfigType
+    ) -> ConfigType:
+        """Validate device condition config."""
+        return await async_validate_device_automation_config(
+            hass, config, cv.DEVICE_CONDITION_SCHEMA, DeviceAutomationType.CONDITION
         )
-        if hasattr(platform, "async_validate_condition_config"):
-            return await platform.async_validate_condition_config(hass, config)
-        return cast(ConfigType, platform.CONDITION_SCHEMA(config))
-    except InvalidDeviceAutomationConfig as err:
-        raise vol.Invalid(str(err) or "Invalid condition configuration") from err
+
+    async def async_condition_from_config(self) -> condition.ConditionCheckerType:
+        """Test a device condition."""
+        platform = await async_get_device_automation_platform(
+            self._hass, self._config[CONF_DOMAIN], DeviceAutomationType.CONDITION
+        )
+        return trace_condition_function(
+            platform.async_condition_from_config(self._hass, self._config)
+        )
 
 
-async def async_condition_from_config(
-    hass: HomeAssistant, config: ConfigType
-) -> condition.ConditionCheckerType:
-    """Test a device condition."""
-    platform = await async_get_device_automation_platform(
-        hass, config[CONF_DOMAIN], DeviceAutomationType.CONDITION
-    )
-    return platform.async_condition_from_config(hass, config)
+CONDITIONS: dict[str, type[Condition]] = {
+    "device": DeviceCondition,
+}
+
+
+async def async_get_conditions(hass: HomeAssistant) -> dict[str, type[Condition]]:
+    """Return the sun conditions."""
+    return CONDITIONS

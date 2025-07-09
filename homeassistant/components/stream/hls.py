@@ -1,4 +1,5 @@
 """Provide functionality to stream HLS."""
+
 from __future__ import annotations
 
 from http import HTTPStatus
@@ -24,9 +25,11 @@ from .core import (
     StreamSettings,
     StreamView,
 )
-from .fmp4utils import get_codec_string
+from .fmp4utils import get_codec_string, transform_init
 
 if TYPE_CHECKING:
+    from homeassistant.components.camera import DynamicStreamSettings
+
     from . import Stream
 
 
@@ -50,9 +53,16 @@ class HlsStreamOutput(StreamOutput):
         hass: HomeAssistant,
         idle_timer: IdleTimer,
         stream_settings: StreamSettings,
+        dynamic_stream_settings: DynamicStreamSettings,
     ) -> None:
         """Initialize HLS output."""
-        super().__init__(hass, idle_timer, stream_settings, deque_maxlen=MAX_SEGMENTS)
+        super().__init__(
+            hass,
+            idle_timer,
+            stream_settings,
+            dynamic_stream_settings,
+            deque_maxlen=MAX_SEGMENTS,
+        )
         self._target_duration = stream_settings.min_segment_duration
 
     @property
@@ -178,9 +188,13 @@ class HlsPlaylistView(StreamView):
         if track.stream_settings.ll_hls:
             playlist.extend(
                 [
-                    f"#EXT-X-PART-INF:PART-TARGET={track.stream_settings.part_target_duration:.3f}",
-                    f"#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK={2*track.stream_settings.part_target_duration:.3f}",
-                    f"#EXT-X-START:TIME-OFFSET=-{EXT_X_START_LL_HLS*track.stream_settings.part_target_duration:.3f},PRECISE=YES",
+                    "#EXT-X-PART-INF:PART-TARGET="
+                    f"{track.stream_settings.part_target_duration:.3f}",
+                    "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK="
+                    f"{2 * track.stream_settings.part_target_duration:.3f}",
+                    "#EXT-X-START:TIME-OFFSET=-"
+                    f"{EXT_X_START_LL_HLS * track.stream_settings.part_target_duration:.3f}"
+                    ",PRECISE=YES",
                 ]
             )
         else:
@@ -193,7 +207,9 @@ class HlsPlaylistView(StreamView):
             # which seems to take precedence for setting target delay. Yet it also
             # doesn't seem to hurt, so we can stick with it for now.
             playlist.append(
-                f"#EXT-X-START:TIME-OFFSET=-{EXT_X_START_NON_LL_HLS*track.target_duration:.3f},PRECISE=YES"
+                "#EXT-X-START:TIME-OFFSET=-"
+                f"{EXT_X_START_NON_LL_HLS * track.target_duration:.3f}"
+                ",PRECISE=YES"
             )
 
         last_stream_id = first_segment.stream_id
@@ -339,7 +355,7 @@ class HlsInitView(StreamView):
         if not (segments := track.get_segments()) or not (body := segments[0].init):
             return web.HTTPNotFound()
         return web.Response(
-            body=body,
+            body=transform_init(body, stream.dynamic_stream_settings.orientation),
             headers={"Content-Type": "video/mp4"},
         )
 

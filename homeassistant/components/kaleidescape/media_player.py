@@ -1,28 +1,23 @@
 """Kaleidescape Media Player."""
+
 from __future__ import annotations
 
+from datetime import datetime
 import logging
-from typing import TYPE_CHECKING
 
 from kaleidescape import const as kaleidescape_const
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
+    MediaPlayerState,
 )
-from homeassistant.const import STATE_IDLE, STATE_OFF, STATE_PAUSED, STATE_PLAYING
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util.dt import utcnow
 
-from .const import DOMAIN as KALEIDESCAPE_DOMAIN
+from . import KaleidescapeConfigEntry
 from .entity import KaleidescapeEntity
-
-if TYPE_CHECKING:
-    from datetime import datetime
-
-    from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
 
 KALEIDESCAPE_PLAYING_STATES = [
     kaleidescape_const.PLAY_STATUS_PLAYING,
@@ -37,10 +32,12 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: KaleidescapeConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the platform from a config entry."""
-    entities = [KaleidescapeMediaPlayer(hass.data[KALEIDESCAPE_DOMAIN][entry.entry_id])]
+    entities = [KaleidescapeMediaPlayer(entry.runtime_data)]
     async_add_entities(entities)
 
 
@@ -56,6 +53,7 @@ class KaleidescapeMediaPlayer(KaleidescapeEntity, MediaPlayerEntity):
         | MediaPlayerEntityFeature.NEXT_TRACK
         | MediaPlayerEntityFeature.PREVIOUS_TRACK
     )
+    _attr_name = None
 
     async def async_turn_on(self) -> None:
         """Send leave standby command."""
@@ -86,15 +84,15 @@ class KaleidescapeMediaPlayer(KaleidescapeEntity, MediaPlayerEntity):
         await self._device.previous()
 
     @property
-    def state(self) -> str:
+    def state(self) -> MediaPlayerState:
         """State of device."""
         if self._device.power.state == kaleidescape_const.DEVICE_POWER_STATE_STANDBY:
-            return STATE_OFF
+            return MediaPlayerState.OFF
         if self._device.movie.play_status in KALEIDESCAPE_PLAYING_STATES:
-            return STATE_PLAYING
+            return MediaPlayerState.PLAYING
         if self._device.movie.play_status in KALEIDESCAPE_PAUSED_STATES:
-            return STATE_PAUSED
-        return STATE_IDLE
+            return MediaPlayerState.PAUSED
+        return MediaPlayerState.IDLE
 
     @property
     def available(self) -> bool:

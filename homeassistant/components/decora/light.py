@@ -1,4 +1,5 @@
 """Support for Decora dimmers."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -6,29 +7,31 @@ import copy
 from functools import wraps
 import logging
 import time
-from typing import TypeVar
+from typing import TYPE_CHECKING, Any, Concatenate
 
-from bluepy.btle import BTLEException  # pylint: disable=import-error
-import decora  # pylint: disable=import-error
-from typing_extensions import Concatenate, ParamSpec
+from bluepy.btle import BTLEException
+import decora
 import voluptuous as vol
 
 from homeassistant import util
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
-    PLATFORM_SCHEMA,
+    PLATFORM_SCHEMA as LIGHT_PLATFORM_SCHEMA,
     ColorMode,
     LightEntity,
 )
 from homeassistant.const import CONF_API_KEY, CONF_DEVICES, CONF_NAME
-from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.issue_registry import IssueSeverity, create_issue
 
-_DecoraLightT = TypeVar("_DecoraLightT", bound="DecoraLight")
-_R = TypeVar("_R")
-_P = ParamSpec("_P")
+from . import DOMAIN
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddEntitiesCallback
+    from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ DEVICE_SCHEMA = vol.Schema(
 
 PLATFORM_SCHEMA = vol.Schema(
     vol.All(
-        PLATFORM_SCHEMA.extend(
+        LIGHT_PLATFORM_SCHEMA.extend(
             {vol.Optional(CONF_DEVICES, default={}): {cv.string: DEVICE_SCHEMA}}
         ),
         _name_validator,
@@ -57,8 +60,8 @@ PLATFORM_SCHEMA = vol.Schema(
 )
 
 
-def retry(
-    method: Callable[Concatenate[_DecoraLightT, _P], _R]
+def retry[_DecoraLightT: DecoraLight, **_P, _R](
+    method: Callable[Concatenate[_DecoraLightT, _P], _R],
 ) -> Callable[Concatenate[_DecoraLightT, _P], _R | None]:
     """Retry bluetooth commands."""
 
@@ -79,8 +82,7 @@ def retry(
                     "Decora connect error for device %s. Reconnecting",
                     device.name,
                 )
-                # pylint: disable=protected-access
-                device._switch.connect()
+                device._switch.connect()  # noqa: SLF001
 
     return wrapper_retry
 
@@ -92,6 +94,21 @@ def setup_platform(
     discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up an Decora switch."""
+    create_issue(
+        hass,
+        HOMEASSISTANT_DOMAIN,
+        f"deprecated_system_packages_yaml_integration_{DOMAIN}",
+        breaks_in_ha_version="2025.12.0",
+        is_fixable=False,
+        issue_domain=DOMAIN,
+        severity=IssueSeverity.WARNING,
+        translation_key="deprecated_system_packages_yaml_integration",
+        translation_placeholders={
+            "domain": DOMAIN,
+            "integration_title": "Leviton Decora",
+        },
+    )
+
     lights = []
     for address, device_config in config[CONF_DEVICES].items():
         device = {}
@@ -110,65 +127,40 @@ class DecoraLight(LightEntity):
     _attr_color_mode = ColorMode.BRIGHTNESS
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 
-    def __init__(self, device):
+    def __init__(self, device: dict[str, Any]) -> None:
         """Initialize the light."""
 
-        self._name = device["name"]
-        self._address = device["address"]
+        self._attr_name = device["name"]
+        self._attr_unique_id = device["address"]
         self._key = device["key"]
-        self._switch = decora.decora(self._address, self._key)
-        self._brightness = 0
-        self._state = False
-
-    @property
-    def unique_id(self):
-        """Return the ID of this light."""
-        return self._address
-
-    @property
-    def name(self):
-        """Return the name of the device if any."""
-        return self._name
-
-    @property
-    def is_on(self):
-        """Return true if device is on."""
-        return self._state
-
-    @property
-    def brightness(self):
-        """Return the brightness of this light between 0..255."""
-        return self._brightness
-
-    @property
-    def assumed_state(self):
-        """We can read the actual state."""
-        return False
+        self._switch = decora.decora(device["address"], self._key)
+        self._attr_brightness = 0
+        self._attr_is_on = False
 
     @retry
-    def set_state(self, brightness):
+    def set_state(self, brightness: int) -> None:
         """Set the state of this lamp to the provided brightness."""
         self._switch.set_brightness(int(brightness / 2.55))
-        self._brightness = brightness
+        self._attr_brightness = brightness
 
     @retry
-    def turn_on(self, **kwargs):
+    def turn_on(self, **kwargs: Any) -> None:
         """Turn the specified or all lights on."""
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         self._switch.on()
-        self._state = True
+        self._attr_is_on = True
 
         if brightness is not None:
             self.set_state(brightness)
 
     @retry
-    def turn_off(self, **kwargs):
+    def turn_off(self, **kwargs: Any) -> None:
         """Turn the specified or all lights off."""
         self._switch.off()
-        self._state = False
+        self._attr_is_on = False
 
     @retry
-    def update(self):
+    def update(self) -> None:
         """Synchronise internal state with the actual light state."""
-        self._brightness = self._switch.get_brightness() * 2.55
-        self._state = self._switch.get_on()
+        self._attr_brightness = self._switch.get_brightness() * 2.55
+        self._attr_is_on = self._switch.get_on()

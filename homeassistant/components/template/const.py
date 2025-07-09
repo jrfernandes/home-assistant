@@ -1,10 +1,20 @@
 """Constants for the Template Platform Components."""
 
 from homeassistant.const import Platform
+from homeassistant.helpers.typing import ConfigType
 
-CONF_AVAILABILITY_TEMPLATE = "availability_template"
 CONF_ATTRIBUTE_TEMPLATES = "attribute_templates"
-CONF_TRIGGER = "trigger"
+CONF_ATTRIBUTES = "attributes"
+CONF_AVAILABILITY = "availability"
+CONF_AVAILABILITY_TEMPLATE = "availability_template"
+CONF_MAX = "max"
+CONF_MIN = "min"
+CONF_OBJECT_ID = "object_id"
+CONF_PICTURE = "picture"
+CONF_PRESS = "press"
+CONF_STEP = "step"
+CONF_TURN_OFF = "turn_off"
+CONF_TURN_ON = "turn_on"
 
 DOMAIN = "template"
 
@@ -16,6 +26,7 @@ PLATFORMS = [
     Platform.BUTTON,
     Platform.COVER,
     Platform.FAN,
+    Platform.IMAGE,
     Platform.LIGHT,
     Platform.LOCK,
     Platform.NUMBER,
@@ -26,8 +37,9 @@ PLATFORMS = [
     Platform.WEATHER,
 ]
 
-CONF_AVAILABILITY = "availability"
-CONF_ATTRIBUTES = "attributes"
-CONF_ATTRIBUTE_TEMPLATES = "attribute_templates"
-CONF_PICTURE = "picture"
-CONF_OBJECT_ID = "object_id"
+
+class TemplateConfig(dict):
+    """Dummy class to allow adding attributes."""
+
+    raw_config: ConfigType | None = None
+    raw_blueprint_inputs: ConfigType | None = None
